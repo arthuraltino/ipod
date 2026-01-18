@@ -14,6 +14,7 @@ import shutil
 import re
 import tempfile
 import signal
+from pathlib import Path
 
 # External libraries
 try:
@@ -23,6 +24,36 @@ except ImportError:
 
 audio_ext = (".mp3", ".m4a", ".m4b", ".m4p", ".aa", ".wav")
 list_ext = (".pls", ".m3u")
+
+def mp3_to_wav(input_path, output_path=None):
+    input_file = Path(input_path)
+    
+    if output_path:
+        output_file = Path(output_path)
+    else:
+        output_file = input_file.with_suffix('.wav')
+
+    if not input_file.exists():
+        print(f"Error: Input file '{input_file}' not found.")
+        return
+
+    command = [
+        "ffmpeg", 
+        "-i", str(input_file),
+        "-y", 
+        "-hide_banner",
+        "-loglevel", "error", 
+        str(output_file)
+    ]
+
+    try:
+        print(f"Converting: {input_file.name} -> {output_file.name}...")
+        subprocess.run(command, check=True)
+        print("Conversion successful!")
+    except subprocess.CalledProcessError as e:
+        print(f"Error during conversion. FFmpeg returned code {e.returncode}.")
+    except FileNotFoundError:
+        print("Error: 'ffmpeg' command not found. Is FFmpeg installed and in your PATH?")
 def make_dir_if_absent(path):
     try:
         os.makedirs(path)
@@ -130,7 +161,8 @@ class Text2Speech(object):
             print("Warning: RHVoice not found, Russian voicever won't be generated.")
         else:
             voiceoverAvailable = True
-
+        Text2Speech.valid_tts['espeak'] = True
+        voiceoverAvailable = True
         # Return if we at least found one voiceover program.
         # Otherwise this will result in silent voiceover for tracks and "Playlist N" for playlists.
         return voiceoverAvailable
@@ -185,7 +217,10 @@ class Text2Speech(object):
     def espeak(out_wav_path, unicodetext):
         if not Text2Speech.valid_tts['espeak']:
             return False
-        subprocess.call(["espeak", "-v", "english_rp", "-s", "150", "-w", out_wav_path, '--', unicodetext])
+        mp3_wav_path = Path(out_wav_path).with_suffix('.mp3')
+        subprocess.call(["edge-tts", "--text", unicodetext, "--write-media", mp3_wav_path, "--voice", "pt-BR-FranciscaNeural"])
+        mp3_to_wav(mp3_wav_path, out_wav_path)
+        # subprocess.call(["espeak", "-v", "english_rp", "-s", "150", "-w", out_wav_path, '--', unicodetext])
         return True
 
     @staticmethod
