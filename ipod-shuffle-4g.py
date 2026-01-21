@@ -49,6 +49,7 @@ def mp3_to_wav(input_path, output_path=None):
     try:
         print(f"Converting: {input_file.name} -> {output_file.name}...")
         subprocess.run(command, check=True)
+        os.remove(input_path)
         print("Conversion successful!")
     except subprocess.CalledProcessError as e:
         print(f"Error during conversion. FFmpeg returned code {e.returncode}.")
@@ -517,7 +518,7 @@ class Playlist(Record):
         # Else generate alternative "All Songs" to fit the speaker voice of other playlists
         if self.playlist_voiceover and (Text2Speech.valid_tts['pico2wave'] or Text2Speech.valid_tts['espeak'] or Text2Speech.valid_tts['say']):
             self["dbid"] = hashlib.md5(b"masterlist").digest()[:8]
-            self.text_to_speech("All songs", self["dbid"], True)
+            self.text_to_speech("Todas as músicas", self["dbid"], True)
         self["listtype"] = 1
         self.listtracks = tracks
 

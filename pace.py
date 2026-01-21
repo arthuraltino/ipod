@@ -1,126 +1,153 @@
 import os
 import shutil
 import sys
+import argparse
 from tqdm import tqdm
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGURAÇÕES DE CAMINHOS ---
 
-# Caminho de origem (Unidade de Rede)
-CAMINHO_ORIGEM = "/Volumes/Downloads/pace"
+# 1. Configuração da Origem (Rede)
+MOUNT_POINT_REDE = "/Volumes/Downloads" # Apenas para verificação
+DIR_ORIGEM_MUSICAS = "/Volumes/Downloads/pace/musicas"
+DIR_ORIGEM_PODCASTS = "/Volumes/Downloads/pace/podcasts"
 
-# Caminho da Raiz do iPod (Para verificação de montagem)
+# 2. Configuração do Destino (iPod)
 CAMINHO_IPOD_RAIZ = "/Volumes/IPOD"
+BASE_IPOD_MUSIC = os.path.join(CAMINHO_IPOD_RAIZ, "iPod_Control", "Music")
 
-# Caminho exato de destino solicitado
-CAMINHO_DESTINO = os.path.join(CAMINHO_IPOD_RAIZ, "iPod_Control", "Music")
+# Define as subpastas específicas no destino
+DIR_DESTINO_MUSICAS = os.path.join(BASE_IPOD_MUSIC, "Musicas")
+DIR_DESTINO_PODCASTS = os.path.join(BASE_IPOD_MUSIC, "Podcasts")
 
 def verificar_montagem():
-    """Verifica se as unidades estão acessíveis."""
-    print("🔍 Verificando conexões...")
-    
-    if not os.path.exists(CAMINHO_ORIGEM):
-        print(f"❌ ERRO: Origem não encontrada (verifique a rede):\n   -> {CAMINHO_ORIGEM}")
+    """Verifica se a unidade de rede e o iPod estão montados."""
+    if not os.path.exists(MOUNT_POINT_REDE):
+        print(f"❌ ERRO: Unidade de rede não encontrada: {MOUNT_POINT_REDE}")
         return False
-        
     if not os.path.exists(CAMINHO_IPOD_RAIZ):
-        print(f"❌ ERRO: iPod não encontrado (verifique se está montado):\n   -> {CAMINHO_IPOD_RAIZ}")
+        print(f"❌ ERRO: iPod não encontrado: {CAMINHO_IPOD_RAIZ}")
         return False
-        
-    print("✅ Unidade de rede e iPod detectados.")
     return True
 
-def limpar_destino():
+def limpar_pasta_especifica(caminho):
     """
-    Apaga TUDO dentro da pasta Music do iPod.
+    Apaga e recria uma pasta específica.
+    Usado para limpar 'Musicas' sem tocar em 'Podcasts' e vice-versa.
     """
-    # Verifica se a pasta destino existe antes de tentar apagar
-    if os.path.exists(CAMINHO_DESTINO):
-        print("\n" + "!"*60)
-        print(f"⚠️  PERIGO: Você está prestes a apagar TODAS as músicas em:")
-        print(f"   -> {CAMINHO_DESTINO}")
-        print("!"*60 + "\n")
-        
-        # --- TRAVA DE SEGURANÇA ---
-        # Para remover a confirmação manual e tornar automático, 
-        # apague ou comente as 4 linhas abaixo:
-        confirmacao = input("Digite 'sim' para apagar o conteúdo do iPod e continuar: ").strip().lower()
-        if confirmacao != 'sim':
-            print("🚫 Operação cancelada.")
-            sys.exit(0)
-        # --------------------------
-
-        print("🗑️  Limpando músicas antigas do iPod...")
+    if os.path.exists(caminho):
         try:
-            # Remove a pasta Music inteira
-            shutil.rmtree(CAMINHO_DESTINO)
-            # Recria a pasta Music vazia
-            os.makedirs(CAMINHO_DESTINO)
-            print("✅ Pasta Music limpa e recriada.")
+            # print(f"🧹 Limpando: {caminho}") # Descomente para log detalhado
+            shutil.rmtree(caminho)
+            os.makedirs(caminho)
         except OSError as e:
-            print(f"❌ Erro ao limpar o iPod: {e}")
-            sys.exit(1)
+            sys.exit(f"❌ Erro ao limpar pasta {caminho}: {e}")
     else:
-        # Se a pasta Music não existir (iPod formatado/novo), cria ela.
-        print("📂 A pasta Music não existia, criando agora...")
-        os.makedirs(CAMINHO_DESTINO, exist_ok=True)
+        os.makedirs(caminho, exist_ok=True)
 
-def copiar_arquivos():
-    # 1. Verifica montagem
+def mapear_arquivos(pares_origem_destino):
+    """
+    Recebe uma lista de tuplas [(Origem1, Destino1), (Origem2, Destino2)...]
+    Retorna a lista de arquivos individuais para copiar e o tamanho total.
+    """
+    lista_copia = []
+    total_bytes = 0
+    
+    print("📦 Mapeando arquivos...")
+
+    for pasta_origem, pasta_destino in pares_origem_destino:
+        if not os.path.exists(pasta_origem):
+            print(f"⚠️  Aviso: Pasta de origem não encontrada: {pasta_origem}")
+            continue
+
+        # Caminha pela pasta de origem
+        for root, _, files in os.walk(pasta_origem):
+            for file in files:
+                if file.startswith('.'): continue
+                
+                caminho_arquivo_origem = os.path.join(root, file)
+                
+                # Calcula o caminho relativo para manter a estrutura de subpastas
+                # Ex: Origem/Rock/song.mp3 -> Destino/Rock/song.mp3
+                caminho_relativo = os.path.relpath(caminho_arquivo_origem, pasta_origem)
+                caminho_arquivo_destino = os.path.join(pasta_destino, caminho_relativo)
+                
+                try:
+                    tamanho = os.path.getsize(caminho_arquivo_origem)
+                    total_bytes += tamanho
+                    lista_copia.append((caminho_arquivo_origem, caminho_arquivo_destino))
+                except OSError:
+                    pass
+    
+    return lista_copia, total_bytes
+
+def obter_modo_operacao():
+    """Define o modo via argumento CLI ou menu interativo."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--modo", choices=['musicas', 'podcasts', 'ambos'], 
+                        help="Modo de operação")
+    args, _ = parser.parse_known_args()
+
+    if args.modo:
+        return args.modo
+
+    print("\nO que você deseja sincronizar?")
+    print(f"1 - Apenas Músicas (Mantém Podcasts intactos)")
+    print(f"2 - Apenas Podcasts (Mantém Músicas intactas)")
+    print(f"3 - Ambos (Apaga e recria tudo)")
+    
+    escolha = input("Escolha (1/2/3): ").strip()
+    if escolha == '1': return 'musicas'
+    if escolha == '2': return 'podcasts'
+    return 'ambos'
+
+def main():
     if not verificar_montagem():
         sys.exit(1)
 
-    # 2. Limpa o destino (Cuidado: apaga arquivos)
-    limpar_destino()
+    modo = obter_modo_operacao()
+    
+    # Lista de tarefas: [(PastaOrigem, PastaDestino), ...]
+    tarefas = []
 
-    # 3. Calcula arquivos para a barra de progresso
-    print("📦 Mapeando arquivos da rede...")
-    arquivos_para_copiar = []
-    tamanho_total_bytes = 0
+    if modo == 'musicas':
+        print("🎵 Modo: Atualizando Músicas...")
+        tarefas.append((DIR_ORIGEM_MUSICAS, DIR_DESTINO_MUSICAS))
+        
+    elif modo == 'podcasts':
+        print("🎙️ Modo: Atualizando Podcasts...")
+        tarefas.append((DIR_ORIGEM_PODCASTS, DIR_DESTINO_PODCASTS))
+        
+    else: # ambos
+        print("🚀 Modo: Atualizando Tudo...")
+        tarefas.append((DIR_ORIGEM_MUSICAS, DIR_DESTINO_MUSICAS))
+        tarefas.append((DIR_ORIGEM_PODCASTS, DIR_DESTINO_PODCASTS))
 
-    for root, dirs, files in os.walk(CAMINHO_ORIGEM):
-        for file in files:
-            if file.startswith('.'): # Ignora .DS_Store e outros ocultos
-                continue
-            
-            caminho_origem = os.path.join(root, file)
-            
-            # Preserva a estrutura de pastas dentro de Music?
-            # Se quiser jogar tudo solto na raiz de Music, a lógica muda.
-            # Aqui mantemos a estrutura original da pasta 'pace':
-            caminho_relativo = os.path.relpath(caminho_origem, CAMINHO_ORIGEM)
-            caminho_final = os.path.join(CAMINHO_DESTINO, caminho_relativo)
-            
-            try:
-                tamanho = os.path.getsize(caminho_origem)
-                tamanho_total_bytes += tamanho
-                arquivos_para_copiar.append((caminho_origem, caminho_final))
-            except OSError:
-                pass
+    # 1. Limpeza Seletiva
+    # O script percorre as tarefas e limpa APENAS os destinos envolvidos.
+    print("🧹 Preparando pastas de destino...")
+    for _, destino in tarefas:
+        limpar_pasta_especifica(destino)
 
-    if not arquivos_para_copiar:
-        print("⚠️  Nenhum arquivo encontrado na origem.")
+    # 2. Mapeamento
+    arquivos, tamanho_total = mapear_arquivos(tarefas)
+
+    if not arquivos:
+        print("⚠️  Nenhum arquivo encontrado para copiar.")
         return
 
-    # 4. Executa a cópia
-    print(f"🚀 Copiando {len(arquivos_para_copiar)} arquivos para o iPod...")
-    
-    # Configuração da barra de progresso
-    with tqdm(total=tamanho_total_bytes, unit='B', unit_scale=True, unit_divisor=1024, desc="Sincronizando") as barra:
-        for origem, destino in arquivos_para_copiar:
+    # 3. Execução da Cópia
+    with tqdm(total=tamanho_total, unit='B', unit_scale=True, desc="Copiando") as barra:
+        for origem, destino in arquivos:
+            print(f"{origem} ----> {destino}")
             try:
-                # Cria subpastas se necessário
                 os.makedirs(os.path.dirname(destino), exist_ok=True)
-                
-                # Copia o arquivo
                 shutil.copy2(origem, destino)
-                
-                # Atualiza barra
                 barra.update(os.path.getsize(origem))
             except Exception as e:
-                print(f"\n❌ Falha ao copiar {origem}: {e}")
+                print(f"❌ Erro ao copiar {os.path.basename(origem)}: {e}")
+    ipod_cmd = "python3 ipod-shuffle-4g.py --verbose --auto-id3-playlists --track-voiceover --playlist-voiceover --rename-unicode /Volumes/IPOD"
+    os.system(ipod_cmd)
+    print("\n✨ Sincronização finalizada com sucesso!")
 
 if __name__ == "__main__":
-    copiar_arquivos()
-    ipod_cmd = "python3 ipod-shuffle-4g.py --verbose --auto-dir-playlists --track-voiceover --playlist-voiceover --rename-unicode /Volumes/IPOD"
-    os.system(ipod_cmd)
-    print("\n🎧 Sincronização com iPod finalizada!")
+    main()
